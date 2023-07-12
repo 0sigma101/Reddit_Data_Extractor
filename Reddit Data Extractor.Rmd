@@ -1,0 +1,186 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+Here the main project start
+
+**Installing the main Packages**
+```{r}
+# Installing Necessary Packages
+install.packages("shiny")
+install.packages("shinythemes")
+install.packages("ggplot2")
+install.packages("rvest")
+install.packages("jsonlite")
+install.packages("RedditExtractoR")
+install.packages("tidyverse")
+install.packages("stringdist")
+```
+**Importing the main Packages**
+```{r}
+library("RedditExtractoR")
+library("tidyverse")
+library("stringdist")
+```
+
+```{r}
+# Function to calculate similarity score between two strings
+calculate_similarity <- function(str1, str2) {
+  return(stringsim(str1,str2)) 
+}
+
+# Function to find the most relevant subreddit for a given issue
+find_relevant_thread <- function(issue,hint) {
+  # Retrieve a list of popular subreddits
+  popular_subreddits <- find_thread_urls(subreddit = hint,sort_by = 'new',period = 'day')
+  view(popular_subreddits)
+  # Calculate similarity scores for each subreddit's title with the given issue
+  similarity_scores <- sapply(popular_subreddits, function(subreddit) {
+    calculate_similarity(issue, popular_subreddits$title)
+  })
+  view(similarity_scores)
+  # Find the subreddit with the highest similarity score
+  most_relevant_subreddit <- popular_subreddits[which.max(similarity_scores),]
+  popular_subreddits <- popular_subreddits[-which.max(similarity_scores),]
+  most_relevant_subreddit <- most_relevant_subreddit %>% add_row(popular_subreddits[which.max(similarity_scores),])
+  popular_subreddits <- popular_subreddits[-which.max(similarity_scores),]
+  most_relevant_subreddit <- most_relevant_subreddit %>% add_row(popular_subreddits[which.max(similarity_scores),])
+  popular_subreddits <- popular_subreddits[-which.max(similarity_scores),]
+  most_relevant_subreddit <- most_relevant_subreddit %>% add_row(popular_subreddits[which.max(similarity_scores),])
+  popular_subreddits <- popular_subreddits[-which.max(similarity_scores),]
+  view(most_relevant_subreddit)
+  return(most_relevant_subreddit$title)
+}
+```
+
+
+```{r}
+to_search_relevant <-function(to_see,hint){
+  to_search = to_see
+  most_relevant_thread = find_relevant_thread(to_search,hint)
+  print(paste("Most relevant subreddit for", to_search, "is", most_relevant_thread))
+  return(most_relevant_thread)
+}
+```
+
+```{r}
+createdata <- function(frame, keyword = NA, to_search = NA){
+  dat <- find_thread_urls(keywords = keyword,subreddit = to_search, sort_by = "new", period = frame)
+  return(dat)
+}
+
+checkdata <- function(data){
+  view(data)
+  most_important_subreddit <- data[which.max(data$comments),]
+  data <- data[-which.max(data$comments),]
+  most_important_subreddit <- most_important_subreddit %>% add_row(data[which.max(data$comments),])
+  data <- data[-which.max(data$comments),]
+  most_important_subreddit <- most_important_subreddit %>% add_row(data[which.max(data$comments),])
+  return(most_important_subreddit)
+}
+```
+
+**Web app**
+```{r}
+# Loading the libraries
+library(shiny)
+library(shinythemes)
+library(ggplot2)
+library(rvest)
+library(jsonlite)
+library(httr)
+```
+
+```{r}
+presenting_the_data <- function(data){
+subreddit_urls <-data
+
+ui <- fluidPage(
+  titlePanel("Reddit Data Extractor"),
+  mainPanel(
+    uiOutput("reddit_posts")
+  )
+)
+
+server <- function(input, output) {
+  extracted_data <- reactive({
+    subreddit_data <- lapply(subreddit_urls, function(url) {
+      response <- GET(paste0(url, ".json"))
+      data <- content(response, "text")
+      subreddit_data <- fromJSON(data)
+      ctr = 0
+      posts <- subreddit_data$data$children
+      post_titles <- sapply(posts, function(post) post$data$title)
+      post_urls <- sapply(posts, function(post) post$data$url)
+      
+      list(post_titles = post_titles, post_urls = post_urls)
+    })
+    subreddit_data
+  })
+
+  output$reddit_posts <- renderUI({
+    subreddit_data <- extracted_data()
+    
+    posts_divs <- lapply(seq_along(subreddit_data), function(i) {
+      post_titles <- subreddit_data[[i]]$post_titles
+      post_urls <- subreddit_data[[i]]$post_urls
+      
+      post_divs <- lapply(seq_along(post_titles), function(j) {
+        div(
+          class = "post",
+          h4(post_titles[j]),
+          if (post_urls[j] != "" || post_urls[j-1] %in% post_urls[j]) {
+            tags$a(href = post_urls[1], "View post")
+          }
+        )
+      })
+      
+      div(class = "subreddit-posts", post_divs)
+    })
+    
+    div(class = "reddit-posts", posts_divs)
+  })
+}
+
+shinyApp(ui, server)}
+```
+
+```{r}
+to_search = readline("Enter the issue you want to figure out ")
+hint = readline("Give any hint please ")
+relevant_search = to_search_relevant(to_search,hint)
+frame = readline("Enter The time frame for search and just enter if nothing ")
+if(frame=='') {
+  frame = 'day'
+}
+```
+
+```{r}
+dataframe <- createdata(keyword = relevant_search[1],to_search = hint, frame = frame)
+important_dataframe <- checkdata(dataframe)
+```
+```{r}
+for (i in 2:length(relevant_search)) {
+  keyword <- relevant_search[i]
+  dataframe <- createdata(keyword = keyword,frame = frame)
+  important_dataframe <- important_dataframe %>% add_row(checkdata(dataframe))
+}
+
+presenting_the_data(important_dataframe$url)
+```
+
+```{r}
+presenting_the_data(important_dataframe$url)
+```
+
